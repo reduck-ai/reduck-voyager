@@ -34,8 +34,11 @@
 	};
 
 	let scroller: HTMLElement;
+	/** The newest line is at the bottom, so the chat follows it as the run goes on. Until the
+	 *  assistant has said anything there is nothing to follow and the ask is the whole chat:
+	 *  it stays at its top, so a long ask is read from its first line rather than its last. */
 	$effect(() => {
-		rows.length;
+		if (!rows.length) return;
 		scroller.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" });
 	});
 </script>

@@ -37,8 +37,16 @@
 	let {
 		runs,
 		task,
-		t = $bindable(0)
-	}: { runs: Lane[]; task?: TaskTrials; t?: number } = $props();
+		t = $bindable(0),
+		speed,
+		autoplay
+	}: {
+		runs: Lane[];
+		task?: TaskTrials;
+		t?: number;
+		speed?: number;
+		autoplay?: boolean;
+	} = $props();
 	const ref = (run: Lane) => `${run.id}@${run.stage}`;
 
 	/** The runs whose result card is closed, and those whose reason is shown whole. */
@@ -177,7 +185,7 @@
 			</div>
 		{/if}
 	</div>
-	<Timeline {duration} {marks} bind:t />
+	<Timeline {duration} {marks} bind:t {speed} {autoplay} />
 </div>
 
 <style>
