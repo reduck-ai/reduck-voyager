@@ -14,5 +14,9 @@ if (import.meta.env.PROD && window.location.hostname === "voyager.reduck.ai") {
 			defaults: "2026-01-30",
 			disable_surveys: true
 		});
+		// rd_vid is the visitor id the Cloudflare Worker sets on .reduck.ai and logs with every
+		// request. Sending it with every event lets PostHog and the Cloudflare logs be joined.
+		const visitorId = document.cookie.match(/(?:^|;\s*)rd_vid=([^;]+)/)?.[1];
+		if (visitorId) posthog.register({ rd_vid: visitorId });
 	});
 }
