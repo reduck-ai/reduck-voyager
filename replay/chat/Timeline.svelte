@@ -1,7 +1,8 @@
 <!--
 	A clock from 0 to `duration` ms: play and pause (the button, or Space), scrub, and a speed.
 	It only moves `t`; bind the same `t` to whatever it should drive. `marks` are moments drawn on
-	the track, each with its label, such as when a run finished.
+	the track, each with its label, such as when a run finished. `speed` is the rate it opens at
+	and `autoplay` starts it there; from then on the buttons own both.
 -->
 <script lang="ts">
 	import { faPause, faPlay } from "@fortawesome/free-solid-svg-icons";
@@ -10,12 +11,23 @@
 	let {
 		duration,
 		t = $bindable(0),
-		marks = []
-	}: { duration: number; t?: number; marks?: { at: number; label: string }[] } = $props();
+		marks = [],
+		speed: opening = 4,
+		autoplay = false
+	}: {
+		duration: number;
+		t?: number;
+		marks?: { at: number; label: string }[];
+		speed?: number;
+		autoplay?: boolean;
+	} = $props();
 
-	const SPEEDS = [1, 4, 16];
-	let speed = $state(4);
-	let playing = $state(false);
+	// A rate with no button of its own would leave the row with nothing lit, so anything but one
+	// of these falls back to the usual rate.
+	// svelte-ignore state_referenced_locally
+	let speed = $state(SPEEDS.includes(opening) ? opening : 4);
+	// svelte-ignore state_referenced_locally
+	let playing = $state(autoplay);
 
 	$effect(() => {
 		if (!playing) return;
@@ -46,6 +58,8 @@
 </script>
 
 <script module lang="ts">
+	export const SPEEDS = [1, 4, 16];
+
 	export const clock = (ms: number) =>
 		`${Math.floor(ms / 60000)}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, "0")}`;
 </script>

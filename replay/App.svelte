@@ -3,7 +3,9 @@
 	A ref is a run id, or `<id>@<stage>` to pin that lane to a stage, so `?run=<id>@raw&run=<id>@draft`
 	puts a run's transcript next to its draft on one timeline. `&stage=` is the stage of the page
 	and of every bare id; `&t=` opens the replay at a moment: `m:ss` as the timeline shows it,
-	seconds, or `end`. The address is the whole state, so a view is a link.
+	seconds, or `end`; `&speed=` is the rate it opens at and `&play` starts it there. The address
+	is the whole state, so a view is a link, and a page that embeds the replay needs no script of
+	its own to drive it.
 
 	Only `pnpm replay` has stages other than published: its server reads any of them, and a switch
 	changes the stage in place, keeping the moment. The built site holds the published files alone
@@ -27,13 +29,17 @@
 		})
 	);
 
-	/** Where the replay opens; from then on the timeline owns the moment. */
-	const start = new URLSearchParams(location.search).get("t") ?? "0";
+	/** Where the replay opens, how fast, and whether it is already running; from then on the
+	 *  timeline owns all three. */
+	const opened = new URLSearchParams(location.search);
+	const start = opened.get("t") ?? "0";
 	let t = $state(
 		start === "end"
 			? Infinity
 			: start.split(":").reduce((s, part) => s * 60 + Number(part), 0) * 1000 || 0
 	);
+	const speed = Number(opened.get("speed")) || undefined;
+	const autoplay = opened.has("play");
 
 	/** Changes the address in place: no reload, and the view follows. */
 	function go(changes: Record<string, string>) {
@@ -63,7 +69,13 @@
 
 {#if refs.length}
 	{#await Promise.all([tasks, runs]) then [tasks, runs]}
-		<Compare {runs} bind:t task={tasks.find((task) => task.id === runs[0].task)} />
+		<Compare
+			{runs}
+			bind:t
+			{speed}
+			{autoplay}
+			task={tasks.find((task) => task.id === runs[0].task)}
+		/>
 	{:catch error}
 		<p>{error.message}</p>
 	{/await}
