@@ -16,7 +16,10 @@ if (import.meta.env.PROD && window.location.hostname === "voyager.reduck.ai") {
 		});
 		// rd_vid is the visitor id the Cloudflare Worker sets on .reduck.ai and logs with every
 		// request. Sending it with every event lets PostHog and the Cloudflare logs be joined.
-		const visitorId = document.cookie.match(/(?:^|;\s*)rd_vid=([^;]+)/)?.[1];
+		// With several rd_vid cookies, the first one holding a valid UUID wins, as in the Worker.
+		const visitorId = [...document.cookie.matchAll(/(?:^|;\s*)rd_vid=([^;]*)/g)]
+			.map((m) => (m[1] ?? "").trim())
+			.find((v) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(v));
 		if (visitorId) posthog.register({ rd_vid: visitorId });
 	});
 }
