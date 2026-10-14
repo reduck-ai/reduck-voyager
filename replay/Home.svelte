@@ -15,7 +15,7 @@
 	import { SvelteSet } from "svelte/reactivity";
 	import { clock } from "./chat/Timeline.svelte";
 	import {
-		ARM_NAMES,
+		armName,
 		day,
 		grader,
 		latest,
@@ -25,7 +25,8 @@
 		verdictLabel,
 		type Stage,
 		type TaskTrials,
-		type Trial
+		type Trial,
+		usd
 	} from "./run.ts";
 
 	let { tasks, stage }: { tasks: TaskTrials[]; stage?: Stage } = $props();
@@ -80,7 +81,7 @@
 			</div>
 			{#each board.arms as a (a.arm)}
 				<div class="row" role="row">
-					<span class="arm" role="rowheader" style:--arm="var(--{a.arm})">{ARM_NAMES[a.arm]}</span>
+					<span class="arm" role="rowheader" style:--arm="var(--{a.arm})">{armName(a.arm)}</span>
 					<span role="cell">{a.passed}/{a.graded}</span>
 					<span role="cell">{board.compared ? clock(a.ms) : "–"}</span>
 					<span role="cell">{board.compared ? `$${a.usd.toFixed(2)}` : "–"}</span>
@@ -91,7 +92,7 @@
 			<p class="lead" style:--arm="var(--{headline.arm})">
 				<FontAwesomeIcon icon={faMedal} />
 				<span
-					><b>{ARM_NAMES[headline.arm]}</b>{#each headline.lines as line}{" · "}<span class="metric"
+					><b>{armName(headline.arm)}</b>{#each headline.lines as line}{" · "}<span class="metric"
 							>{#if line.n}<b>{line.n}</b>{" "}{/if}{line.word}</span
 						>{/each}, on the {board.compared}
 					{board.compared === 1 ? "task" : "tasks"} both passed</span
@@ -132,7 +133,7 @@
 					{#if result.winner}
 						<FontAwesomeIcon icon={faMedal} />
 						<span
-							><b>{ARM_NAMES[result.winner.arm]} won</b>{#each result.lines as line}{" · "}<span
+							><b>{armName(result.winner.arm)} won</b>{#each result.lines as line}{" · "}<span
 									class="metric">{#if line.n}<b>{line.n}</b>{" "}{/if}{line.word}</span
 								>{/each}</span
 						>
@@ -143,10 +144,10 @@
 				{#each trial.runs as run (run.id)}
 					{@const why = reasons.has(run.id)}
 					<div class="run" style:--arm="var(--{run.arm})">
-						<span class="arm">{ARM_NAMES[run.arm]}</span>
+						<span class="arm">{armName(run.arm)}</span>
 						<span class="bar"><span style:width="{(run.wallMs / longest) * 100}%"></span></span>
 						<span class="n">{clock(run.wallMs)}</span>
-						<span class="n">${run.costUsd.toFixed(2)}</span>
+						<span class="n">{usd(run.costUsd)}</span>
 						{#if run.verdict?.detail}
 							<button
 								class="grade"
@@ -163,7 +164,7 @@
 						{/if}
 					</div>
 					{#if why && run.verdict?.detail}
-						<p class="why">By {grader(run.verdict)}: {run.verdict.detail}</p>
+						<p class="why">{grader(run.verdict)}: {run.verdict.detail}</p>
 					{/if}
 				{/each}
 			</div>

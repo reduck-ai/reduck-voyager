@@ -13,7 +13,7 @@ import { execFile } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { load, runs, stageFile } from "./data.ts";
+import { load, runs, stageFile, withSession } from "./data.ts";
 import { listSessions, parseSession, projectDir, type Step } from "./session.ts";
 import { tasks } from "./task.ts";
 
@@ -50,6 +50,11 @@ function open(id: string, dir: string, at: z.infer<typeof stage>): { id: string;
 		return { ...run, ...session };
 	}
 	const run = runs().find((r) => r.id === id);
+	// An imported run has no transcript: its chat is read from its record.
+	if (run?.record) {
+		const { session, ...rest } = withSession(run);
+		return { ...rest, ...session };
+	}
 	return parseSession(run?.transcript ?? (id.startsWith("/") ? id : join(projectDir(dir), `${id}.jsonl`)));
 }
 

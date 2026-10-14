@@ -5,17 +5,43 @@ import type { Chat } from "./chat/chat.ts";
 export type Run = {
 	id: string;
 	task: string;
-	arm: "reduck" | "chrome";
+	/** A bench arm (`ARM_NAMES`), or the label an imported run was given (`pnpm ingest`). */
+	arm: string;
+	/** The question, for a run whose task is no file in `tasks/` (an imported one). */
+	prompt?: string;
 	verdict: Verdict | null;
 	outcome: string;
 	wallMs: number;
-	costUsd: number;
+	/** Null when the run has no such number (an imported script run). */
+	costUsd: number | null;
 	/** Tokens in the model's context at its last call: what the task cost it to hold. */
-	context: number;
+	context: number | null;
 	answer: string;
 };
 
-export type RunWithSession = Run & { session: Chat & { models: string[] } };
+/** One page a search put in front of the model, or the answer cited. `call` counts the run's
+ *  search calls from 1 and `rank` is the page's place in that call's list from 0, as the
+ *  assistant's own `ref` numbers it; both null for a citation with no search result behind it.
+ *  `queries` are what the call's round typed (a round can span several calls), null when the
+ *  page does not show them (ChatGPT signed out). `ref` is the assistant's own id, verbatim. */
+export type Page = {
+	ref: string | null;
+	url: string;
+	title: string | null;
+	call: number | null;
+	rank: number | null;
+	type: string | null;
+	queries: string[] | null;
+	cited: boolean;
+};
+
+export type RunWithSession = Run & { session: Chat & { models: string[] }; pages?: Page[] };
+
+/** Two urls of one page compare equal: no fragment, no trailing slash, no `www.`. */
+export const pageKey = (url: string) =>
+	url.replace(/#.*$/, "").replace(/\/+$/, "").replace(/^(https?:\/\/)www\./, "$1");
+
+export const hostOf = (url: string) => new URL(url).hostname.replace(/^www\./, "");
 
 /** Where a run is on its way to the site: its transcript as recorded, its scrubbed draft under
  *  review, or the approved file the site shows. The same shape at every stage (data.ts). */
@@ -28,20 +54,25 @@ export type Trial = { id: string; runs: Run[] };
 /** A task and its trials, newest first: `data/tasks.json` is a list of these. */
 export type TaskTrials = Pick<Task, "id" | "name" | "prompt"> & { trials: Trial[] };
 
-export const ARM_NAMES: Record<Run["arm"], string> = {
+export const ARM_NAMES: Record<string, string> = {
 	reduck: "Claude with Reduck MCP",
 	chrome: "Claude with Chrome MCP"
 };
+export const armName = (arm: string) => ARM_NAMES[arm] ?? arm;
 
-export const kTokens = (n: number) => `${Math.round(n / 1000)}k`;
+/** The site whose pages a list of search results highlights: this benchmark is Reduck's. */
+export const OURS = "reduck.ai";
+
+export const kTokens = (n: number | null) => (n === null ? "–" : `${Math.round(n / 1000)}k`);
+export const usd = (n: number | null) => (n === null ? "–" : `$${n.toFixed(2)}`);
 
 export const verdictLabel = (run: Run) =>
 	run.verdict ? (run.verdict.pass ? "✓ Passed" : "✗ Failed") : "Not graded";
 
 const GRADERS: Record<NonNullable<Verdict["by"]>, string> = {
-	check: "the check",
-	model: "a model",
-	person: "a person"
+	check: "Automatic check",
+	model: "Model check",
+	person: "Manual check"
 };
 export const grader = (verdict: Verdict) => GRADERS[verdict.by ?? "check"];
 
@@ -73,7 +104,7 @@ function ratio(mine: number, theirs: number, better: string, worse: string, same
  *  whichever way it goes. No winner when a run is missing, ungraded, or both failed. */
 export function outcome(runs: Run[]): { winner: Run | null; lines: Line[]; text: string } {
 	const [a, b] = runs;
-	if (!b) return { winner: null, lines: [], text: `Only ${ARM_NAMES[a.arm]} ran` };
+	if (!b) return { winner: null, lines: [], text: `Only ${armName(a.arm)} ran` };
 	if (!a.verdict || !b.verdict) return { winner: null, lines: [], text: "Not graded yet" };
 	const passed = runs.filter((r) => r.verdict?.pass);
 	if (!passed.length) return { winner: null, lines: [], text: "Both failed" };
@@ -82,18 +113,21 @@ export function outcome(runs: Run[]): { winner: Run | null; lines: Line[]; text:
 	if (passed.length === 1) {
 		winner = passed[0];
 		const loser = winner === a ? b : a;
-		lines = [{ n: "", word: `${ARM_NAMES[loser.arm]} failed` }];
+		lines = [{ n: "", word: `${armName(loser.arm)} failed` }];
 	} else {
 		const other = a.wallMs <= b.wallMs ? b : a;
 		winner = other === a ? b : a;
+		/** A metric both runs have; none when either lacks it (an imported script run). */
+		const both = (mine: number | null, theirs: number | null, ...words: [string, string, string]) =>
+			mine === null || theirs === null ? [] : [ratio(mine, theirs, ...words)];
 		lines = [
 			ratio(winner.wallMs, other.wallMs, "faster", "slower", "about as fast"),
-			ratio(winner.costUsd, other.costUsd, "cheaper", "costlier", "about the same cost"),
-			ratio(winner.context, other.context, "smaller context", "larger context", "about the same context")
+			...both(winner.costUsd, other.costUsd, "cheaper", "costlier", "about the same cost"),
+			...both(winner.context, other.context, "smaller context", "larger context", "about the same context")
 		];
 	}
 	const said = lines.map((l) => (l.n ? `${l.n} ${l.word}` : l.word)).join(" · ");
-	return { winner, lines, text: `${ARM_NAMES[winner.arm]} won · ${said}` };
+	return { winner, lines, text: `${armName(winner.arm)} won · ${said}` };
 }
 
 /** The trial a task is shown by: its newest with both tools, else its newest. */
@@ -107,7 +141,7 @@ export function scoreboard(tasks: TaskTrials[]) {
 	const trials = tasks.map(latest).filter((t) => t.runs.length > 1);
 	const bothPassed = trials.filter((t) => t.runs.every((r) => r.verdict?.pass));
 	const mean = (xs: number[]) => xs.reduce((s, x) => s + x, 0) / (xs.length || 1);
-	const arms = Object.keys(ARM_NAMES) as Run["arm"][];
+	const arms = Object.keys(ARM_NAMES);
 	return {
 		compared: bothPassed.length,
 		arms: arms.map((arm) => {
@@ -118,7 +152,7 @@ export function scoreboard(tasks: TaskTrials[]) {
 				passed: graded.filter((r) => r.verdict!.pass).length,
 				graded: graded.length,
 				ms: mean(mine(bothPassed).map((r) => r.wallMs)),
-				usd: mean(mine(bothPassed).map((r) => r.costUsd))
+				usd: mean(mine(bothPassed).map((r) => r.costUsd ?? 0))
 			};
 		})
 	};

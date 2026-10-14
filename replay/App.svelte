@@ -1,5 +1,5 @@
 <!--
-	The route. `?run=<ref>&run=<ref>` compares those runs; without one, every task with its results.
+	The route. `?run=<ref>&run=<ref>` compares those runs, two at most; without one, every task with its results.
 	A ref is a run id, or `<id>@<stage>` to pin that lane to a stage, so `?run=<id>@raw&run=<id>@draft`
 	puts a run's transcript next to its draft on one timeline. `&stage=` is the stage of the page
 	and of every bare id; `&t=` opens the replay at a moment: `m:ss` as the timeline shows it,
@@ -58,10 +58,14 @@
 	}
 
 	const tasks = $derived(get("tasks", stage) as Promise<TaskTrials[]>);
+	/** Two runs at most side by side: more than two cannot be read as a comparison. */
+	const MAX = 2;
 	const runs = $derived(
-		Promise.all(
-			refs.map(async (ref) => ({ ...((await get(ref.id, ref.stage)) as RunWithSession), stage: ref.stage }))
-		)
+		refs.length > MAX
+			? Promise.reject(new Error(`${refs.length} runs named: compare ${MAX} at most.`))
+			: Promise.all(
+					refs.map(async (ref) => ({ ...((await get(ref.id, ref.stage)) as RunWithSession), stage: ref.stage }))
+				)
 	);
 </script>
 

@@ -16,6 +16,7 @@
 		"replay": "vite",
 		"export": "node export.ts",
 		"grade": "node grade.ts",
+		"ingest": "node ingest.ts",
 		"build": "vite build",
 		"check": "svelte-check",
 		"clean-downloads": "node clean.ts"
