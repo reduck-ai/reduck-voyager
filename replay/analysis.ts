@@ -29,15 +29,17 @@ export const NOTES: Notes = {
 		"Reduck's cost is overhead, not the scripts' work: about 40k characters of script lists and tool descriptions before the first run, script results of 40k to 140k characters, and a 96k-character guide each time a session opens. That is why it ends with more context on every task.",
 		"Reduck's fan-out is limited by the paired browser: it runs 2 scripts at a time, so 12 product pages sent at once queue, and many tabs loading at once in a background window time out. Parallel runs pay off only within that budget.",
 		"The model's way of working varies from run to run: the same IMDb task on the same Chrome arm took 1:42 in one trial and 5:01 in the next, where it waited on its own in-page scraper with 113 s of sleep. Every cell is one run: repeat the trials before drawing a ratio.",
+		"Raising the paired browser's budget from 2 to 4 scripts at once did not settle anything: on Trustpilot, the only run that went end to end at 4, Reduck took 1:46 against 1:54 at 2, with the same cost and context. The 3 other runs at 4 lost the browser (pages timing out, then the extension no longer answering) and were set aside. The extension also dropped twice at a budget of 2 today, so the budget cannot be blamed on this evidence alone.",
+		"Zillow's anti-bot protection flagged the browser after about 15 Zillow page loads in two hours, from Reduck's scripts, the checks and the Chrome arm together: one person's browser can only take so much of one site, whatever the tool. Zillow was left out of the trial at a budget of 4.",
 		"Claude in Chrome refuses some sites outright: reddit.com was refused as \"not allowed due to safety restrictions\" when opened from this session. Reduck's scripts are not subject to that policy.",
-		"Every run kept here went end to end: runs where the paired browser stopped answering, a permission prompt timed out, or a check could not run were set aside and run again. Each kept run used its own tool alone (checked on every transcript)."
+		"Every run kept here went end to end, and the analysis states the Reduck budget (scripts at once) of each: runs where the paired browser stopped answering, a permission prompt timed out, or a check could not run were set aside and run again. Each kept run used its own tool alone (checked on every transcript)."
 	],
 	fixes: [
 		"Smaller results, first. trustpilot.com/get_reviews returned 287 KB for 4 companies (replies and metadata included), imdb.com/search_titles 44k to 68k characters (plots, image links), the 3-store batch 139k. Offer a compact output or a fields argument: it is most of Reduck's extra context and cost.",
 		"Cheaper discovery. list_scripts with no argument returns about 21k characters, read_script 8k to 18k, and start_session returns the whole authoring guide (96k characters) on every call. Return a short list by default and the guide once, on request.",
 		"One script per page. Trustpilot's 1-star reviews page holds the TrustScore too, but it takes get_company and get_reviews: 16 page loads where Chrome needed 8.",
 		"Faster scripts. Read the site's embedded data or its API from the page, as the Chrome arm does, instead of rendering and parsing the whole page: one Zillow search took 55 s, a Trustpilot page 12 to 20 s, where Chrome fetched 8 Trustpilot pages in about 1 s.",
-		"Fan-out within the device's budget. A device runs 2 scripts at once: tell the agent so in run_script's description, or queue the rest without loading their tabs, so that 12 scripts sent at once do not time out in a background window.",
+		"Fan-out within the device's budget. A device runs 2 scripts at once by default (its owner can raise it): tell the agent its budget in run_script's description, or queue the rest without loading their tabs, so that 12 scripts sent at once do not time out in a background window.",
 		"Consistent ids between scripts. The agent called walmart.com/get-product three times with itemId, the name it guessed from the search output: the id a search returns should be the argument the next script takes, under the same name.",
 		"A reliable paired browser. The extension stopped answering twice in one afternoon (device_error, then lost its connection to reduck.ai), and needed Chrome to be restarted: it must recover on its own.",
 		"Amazon limits review access on an account that reads many reviews pages (\"unusual activity\"): the review script now says so instead of returning unfiltered reviews, but the Amazon task cannot be run until the account's access is restored."
@@ -47,6 +49,7 @@ export const NOTES: Notes = {
 			summary:
 				"Chrome won: 0:50 against 1:54, $0.14 against $0.26, 24k against 59k of context. Both had all 8 TrustScores right.",
 			why: [
+				"At a budget of 4 scripts at once instead of 2, Reduck took 1:46 instead of 1:54, at the same cost: the time goes to loading pages and parsing results, not to waiting for a free slot.",
 				"Reduck spent 61% of its time waiting on scripts: 16 runs (get_company and get_reviews for each of the 8 companies), each a new tab loading Trustpilot, sent as 4 calls of 4, 12 to 20 s each.",
 				"Chrome opened one Trustpilot page, then fetched the 8 companies' 1-star pages from inside it in one JavaScript call (about 1 s): each page carries both the TrustScore and the reviews in its embedded data.",
 				"get_reviews returned 287 KB and 254 KB for 4 companies each: too large for the chat, so Hermes saved them to disk and the agent spent 3 more turns parsing them with Python.",
