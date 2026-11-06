@@ -6,6 +6,12 @@ export type Run = {
 	id: string;
 	task: string;
 	arm: "reduck" | "chrome";
+	/** The agent harness the run went through; absent for Claude Code, the default. */
+	harness?: "hermes";
+	/** How many scripts the paired browser ran at once (its concurrency budget), on a Reduck run. */
+	reduckConcurrency?: number;
+	/** Why the run is no test of its tool (see audit.ts): absent when it used its tool alone. */
+	offTool?: string;
 	verdict: Verdict | null;
 	outcome: string;
 	wallMs: number;
@@ -33,10 +39,18 @@ export const ARM_NAMES: Record<Run["arm"], string> = {
 	chrome: "Claude with Chrome MCP"
 };
 
-export const kTokens = (n: number) => `${Math.round(n / 1000)}k`;
+/** One run's name: its tool, said with the harness it went through. `ARM_NAMES` names a tool
+ *  over every run of it, which are Claude Code's (see `scoreboard`). */
+export const armName = (run: Pick<Run, "arm" | "harness">) =>
+	run.harness === "hermes"
+		? ARM_NAMES[run.arm].replace(/^Claude/, "Hermes")
+		: ARM_NAMES[run.arm];
+
+export const kTokens =(n: number) => `${Math.round(n / 1000)}k`;
 
 export const verdictLabel = (run: Run) =>
-	run.verdict ? (run.verdict.pass ? "✓ Passed" : "✗ Failed") : "Not graded";
+	(run.offTool ? `⚠ ${run.offTool} · ` : "") +
+	(run.verdict ? (run.verdict.pass ? "✓ Passed" : "✗ Failed") : "Not graded");
 
 const GRADERS: Record<NonNullable<Verdict["by"]>, string> = {
 	check: "the check",
@@ -46,9 +60,11 @@ const GRADERS: Record<NonNullable<Verdict["by"]>, string> = {
 export const grader = (verdict: Verdict) => GRADERS[verdict.by ?? "check"];
 
 /** When a trial started: its id is the ISO time of its `pnpm bench` call, with `-` for `:`
- *  and `.`. */
+ *  and `.`, after `hermes-` for a trial of hermes.ts. */
 export const day = (trial: Trial) =>
-	new Date(trial.id.replace(/T(\d\d)-(\d\d)-(\d\d)-(\d+)Z$/, "T$1:$2:$3.$4Z")).toLocaleString("en-GB", {
+	new Date(
+		trial.id.replace(/^hermes-/, "").replace(/T(\d\d)-(\d\d)-(\d\d)-(\d+)Z$/, "T$1:$2:$3.$4Z")
+	).toLocaleString("en-GB", {
 		day: "numeric",
 		month: "short",
 		hour: "2-digit",
@@ -73,7 +89,7 @@ function ratio(mine: number, theirs: number, better: string, worse: string, same
  *  whichever way it goes. No winner when a run is missing, ungraded, or both failed. */
 export function outcome(runs: Run[]): { winner: Run | null; lines: Line[]; text: string } {
 	const [a, b] = runs;
-	if (!b) return { winner: null, lines: [], text: `Only ${ARM_NAMES[a.arm]} ran` };
+	if (!b) return { winner: null, lines: [], text: `Only ${armName(a)} ran` };
 	if (!a.verdict || !b.verdict) return { winner: null, lines: [], text: "Not graded yet" };
 	const passed = runs.filter((r) => r.verdict?.pass);
 	if (!passed.length) return { winner: null, lines: [], text: "Both failed" };
@@ -82,7 +98,7 @@ export function outcome(runs: Run[]): { winner: Run | null; lines: Line[]; text:
 	if (passed.length === 1) {
 		winner = passed[0];
 		const loser = winner === a ? b : a;
-		lines = [{ n: "", word: `${ARM_NAMES[loser.arm]} failed` }];
+		lines = [{ n: "", word: `${armName(loser)} failed` }];
 	} else {
 		const other = a.wallMs <= b.wallMs ? b : a;
 		winner = other === a ? b : a;
@@ -93,7 +109,7 @@ export function outcome(runs: Run[]): { winner: Run | null; lines: Line[]; text:
 		];
 	}
 	const said = lines.map((l) => (l.n ? `${l.n} ${l.word}` : l.word)).join(" · ");
-	return { winner, lines, text: `${ARM_NAMES[winner.arm]} won · ${said}` };
+	return { winner, lines, text: `${armName(winner)} won · ${said}` };
 }
 
 /** The trial a task is shown by: its newest with both tools, else its newest. */
@@ -104,11 +120,19 @@ export const latest = (task: TaskTrials): Trial =>
  *  mean time and cost over the tasks both tools passed, so that a fast failure does not pass
  *  for speed. */
 export function scoreboard(tasks: TaskTrials[]) {
-	const trials = tasks.map(latest).filter((t) => t.runs.length > 1);
+	// One harness only, so the board never weighs one harness on a task against the other on
+	// another: Hermes when there are Hermes trials, else Claude Code.
+	const harness: Run["harness"] = tasks.some((t) => t.trials.some((tr) => tr.runs.some((r) => r.harness === "hermes")))
+		? "hermes"
+		: undefined;
+	const trials = tasks
+		.map((task) => latest({ ...task, trials: task.trials.filter((t) => t.runs.every((r) => r.harness === harness)) }))
+		.filter((t) => t && t.runs.length > 1);
 	const bothPassed = trials.filter((t) => t.runs.every((r) => r.verdict?.pass));
 	const mean = (xs: number[]) => xs.reduce((s, x) => s + x, 0) / (xs.length || 1);
 	const arms = Object.keys(ARM_NAMES) as Run["arm"][];
 	return {
+		harness,
 		compared: bothPassed.length,
 		arms: arms.map((arm) => {
 			const mine = (ts: Trial[]) => ts.flatMap((t) => t.runs.filter((r) => r.arm === arm));

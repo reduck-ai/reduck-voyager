@@ -13,9 +13,10 @@
 	import { FontAwesomeIcon } from "@fortawesome/svelte-fontawesome";
 	import { untrack } from "svelte";
 	import { SvelteSet } from "svelte/reactivity";
+	import Analysis from "./Analysis.svelte";
 	import { clock } from "./chat/Timeline.svelte";
 	import {
-		ARM_NAMES,
+		armName,
 		day,
 		grader,
 		latest,
@@ -80,7 +81,7 @@
 			</div>
 			{#each board.arms as a (a.arm)}
 				<div class="row" role="row">
-					<span class="arm" role="rowheader" style:--arm="var(--{a.arm})">{ARM_NAMES[a.arm]}</span>
+					<span class="arm" role="rowheader" style:--arm="var(--{a.arm})">{armName({ arm: a.arm, harness: board.harness })}</span>
 					<span role="cell">{a.passed}/{a.graded}</span>
 					<span role="cell">{board.compared ? clock(a.ms) : "–"}</span>
 					<span role="cell">{board.compared ? `$${a.usd.toFixed(2)}` : "–"}</span>
@@ -91,7 +92,7 @@
 			<p class="lead" style:--arm="var(--{headline.arm})">
 				<FontAwesomeIcon icon={faMedal} />
 				<span
-					><b>{ARM_NAMES[headline.arm]}</b>{#each headline.lines as line}{" · "}<span class="metric"
+					><b>{armName({ arm: headline.arm, harness: board.harness })}</b>{#each headline.lines as line}{" · "}<span class="metric"
 							>{#if line.n}<b>{line.n}</b>{" "}{/if}{line.word}</span
 						>{/each}, on the {board.compared}
 					{board.compared === 1 ? "task" : "tasks"} both passed</span
@@ -107,6 +108,8 @@
 			{/if}
 		</p>
 	</section>
+
+	<Analysis {tasks} />
 
 	<h2 class="section">Tasks <span>{tasks.length}</span></h2>
 
@@ -132,7 +135,7 @@
 					{#if result.winner}
 						<FontAwesomeIcon icon={faMedal} />
 						<span
-							><b>{ARM_NAMES[result.winner.arm]} won</b>{#each result.lines as line}{" · "}<span
+							><b>{armName(result.winner)} won</b>{#each result.lines as line}{" · "}<span
 									class="metric">{#if line.n}<b>{line.n}</b>{" "}{/if}{line.word}</span
 								>{/each}</span
 						>
@@ -143,7 +146,7 @@
 				{#each trial.runs as run (run.id)}
 					{@const why = reasons.has(run.id)}
 					<div class="run" style:--arm="var(--{run.arm})">
-						<span class="arm">{ARM_NAMES[run.arm]}</span>
+						<span class="arm">{armName(run)}</span>
 						<span class="bar"><span style:width="{(run.wallMs / longest) * 100}%"></span></span>
 						<span class="n">{clock(run.wallMs)}</span>
 						<span class="n">${run.costUsd.toFixed(2)}</span>
@@ -171,7 +174,7 @@
 			<footer>
 				{#if task.trials.length > 1}
 					<select bind:value={picked[task.id]} aria-label="Run">
-						{#each task.trials as t (t.id)}<option value={t.id}>{day(t)}</option>{/each}
+						{#each task.trials as t (t.id)}<option value={t.id}>{day(t)}{t.runs.some((r) => r.harness) ? " · Hermes" : " · Claude Code"}</option>{/each}
 					</select>
 				{:else}
 					<span>{day(trial)}</span>
