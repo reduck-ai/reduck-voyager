@@ -161,6 +161,8 @@ async function run(task: Task, arm: Arm) {
 	} finally {
 		clearTimeout(timer);
 	}
+	// The session's time only: a check can run scripts of its own, which are no part of the run.
+	const wallMs = Date.now() - start;
 
 	// What the run produced: new files in ~/Downloads, and whatever it left in its cwd.
 	const produced = [
@@ -200,7 +202,7 @@ async function run(task: Task, arm: Arm) {
 		mcp: arm === "reduck" ? REDUCK_MCP : undefined,
 		verdict,
 		outcome: failure || (result?.subtype ?? "no result"),
-		wallMs: Date.now() - start,
+		wallMs,
 		turns: result?.num_turns ?? 0,
 		costUsd: result?.total_cost_usd ?? 0,
 		usage: result?.usage,
