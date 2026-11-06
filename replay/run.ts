@@ -119,12 +119,9 @@ export const latest = (task: TaskTrials): Trial =>
 /** Each tool over the latest trial of every task: how many of its graded runs passed, and its
  *  mean time and cost over the tasks both tools passed, so that a fast failure does not pass
  *  for speed. */
-export function scoreboard(tasks: TaskTrials[]) {
-	// One harness only, so the board never weighs one harness on a task against the other on
-	// another: Hermes when there are Hermes trials, else Claude Code.
-	const harness: Run["harness"] = tasks.some((t) => t.trials.some((tr) => tr.runs.some((r) => r.harness === "hermes")))
-		? "hermes"
-		: undefined;
+export function scoreboard(tasks: TaskTrials[], harness: Run["harness"]) {
+	// One harness per board, so a board never weighs one harness on a task against the other on
+	// another.
 	const trials = tasks
 		.map((task) => latest({ ...task, trials: task.trials.filter((t) => t.runs.every((r) => r.harness === harness)) }))
 		.filter((t) => t && t.runs.length > 1);
@@ -147,6 +144,12 @@ export function scoreboard(tasks: TaskTrials[]) {
 		})
 	};
 }
+
+/** The harnesses the tasks have trials of, Hermes first: one scoreboard each. */
+export const harnessesOf = (tasks: TaskTrials[]): Run["harness"][] =>
+	(["hermes", undefined] as Run["harness"][]).filter((h) =>
+		tasks.some((t) => t.trials.some((tr) => tr.runs.length > 1 && tr.runs.every((r) => r.harness === h)))
+	);
 
 /** The scoreboard in one line: the faster tool over the tasks both passed (the cheaper on a
  *  tie of time), and by how much it was faster and cheaper (or costlier). None until a task has

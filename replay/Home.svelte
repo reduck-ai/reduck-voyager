@@ -19,6 +19,7 @@
 		armName,
 		day,
 		grader,
+		harnessesOf,
 		latest,
 		lead,
 		outcome,
@@ -32,8 +33,12 @@
 	let { tasks, stage }: { tasks: TaskTrials[]; stage?: Stage } = $props();
 
 	let picked = $state(untrack(() => Object.fromEntries(tasks.map((t) => [t.id, latest(t).id]))));
-	const board = $derived(scoreboard(tasks));
-	const headline = $derived(lead(board));
+	const boards = $derived(
+		harnessesOf(tasks).map((harness) => {
+			const board = scoreboard(tasks, harness);
+			return { board, headline: lead(board) };
+		})
+	);
 	/** Tasks whose prompt is cut, those shown whole, and runs whose grade's reason is shown. */
 	const cut = new SvelteSet<string>();
 	const prompts = new SvelteSet<string>();
@@ -71,11 +76,12 @@
 		</p>
 	</header>
 
+	{#each boards as { board, headline }, i (board.harness ?? "claude-code")}
 	<section class="board">
 		<!-- A table to a screen reader; the rows stay grids, so a phone can fold them. -->
-		<div role="table" aria-labelledby="metrics">
+		<div role="table" aria-labelledby="metrics-{i}">
 			<div class="row head" role="row">
-				<span role="columnheader"><h2 id="metrics">Key metrics</h2></span><span role="columnheader"
+				<span role="columnheader"><h2 id="metrics-{i}">Key metrics · {board.harness === "hermes" ? "Hermes" : "Claude Code"}</h2></span><span role="columnheader"
 					>Passed</span
 				><span role="columnheader">Avg time*</span><span role="columnheader">Avg cost*</span>
 			</div>
@@ -108,6 +114,7 @@
 			{/if}
 		</p>
 	</section>
+	{/each}
 
 	<Analysis {tasks} />
 

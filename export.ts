@@ -24,7 +24,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { index, PUBLISHED, runs, stageFile, withSession } from "./data.ts";
-import type { Run, RunWithSession } from "./replay/run.ts";
+import type { Run, RunWithSession, TaskTrials } from "./replay/run.ts";
 import { tasks } from "./task.ts";
 
 const DENY = join(import.meta.dirname, "tasks/private/deny.txt");
@@ -119,5 +119,18 @@ const listed: Run[] = [...texts.values()].map((text) => {
 	const { session: _, ...run }: RunWithSession = JSON.parse(text);
 	return run;
 });
-write(join(PUBLISHED, "tasks.json"), JSON.stringify(index(listed, allTasks)));
+// A published task whose file this machine lacks (a private one, kept by whoever ran it) keeps
+// its name and prompt from the index already published, so approving here never drops it.
+const indexFile = join(PUBLISHED, "tasks.json");
+const before: TaskTrials[] = existsSync(indexFile) ? JSON.parse(readFileSync(indexFile, "utf8")) : [];
+// The index keeps no `pinned`: a task listed above every task this machine has a file for was
+// pinned (index() puts pinned tasks first), so it stays first.
+const firstKnown = before.findIndex((t) => taskOf.has(t.id));
+const known = [
+	...allTasks,
+	...before
+		.filter((t) => !taskOf.has(t.id))
+		.map(({ id, name, prompt }) => ({ id, name, prompt, pinned: firstKnown === -1 || before.findIndex((t) => t.id === id) < firstKnown }))
+];
+write(indexFile, JSON.stringify(index(listed, known)));
 console.log(`${ids.length} approved, ${listed.length} published → ${PUBLISHED}`);
