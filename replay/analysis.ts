@@ -13,6 +13,8 @@ export type TaskNote = {
 export type Notes = {
 	/** When these notes were last checked against the runs, YYYY-MM-DD. */
 	asOf: string;
+	/** What a reader with a minute takes away, first on the page. */
+	tldr: string[];
 	/** The few findings that hold across tasks. */
 	findings: string[];
 	/** What Reduck should change, each with the run that shows it. */
@@ -22,6 +24,14 @@ export type Notes = {
 
 export const NOTES: Notes = {
 	asOf: "2026-11-06",
+	tldr: [
+		"Both tools passed all 5 public tasks: accuracy is a tie.",
+		"Chrome was faster on 3 of 5 and cheaper on 4 of 5. Over the 5, Reduck took 1.3× more time, cost 1.2× more and ended with 1.7× more context.",
+		"Reduck won where one saved script replaces many steps: IMDb (3× faster) and Reddit (faster and cheaper).",
+		"Chrome won by writing its own scraper in the page: filters in the URL, the site's own data read with JavaScript.",
+		"Reduck's gap is overhead, not its scripts: long discovery calls, large results, a 96k guide per session. Each is fixable (see What Reduck should fix).",
+		"Hermes with Sonnet 5.5, Reduck at 2 scripts at once, one run per task, public sites with no sign-in: a first read, not a verdict."
+	],
 	findings: [
 		"Both tools passed all 5 tasks. On public sites with no sign-in, accuracy does not separate them: the difference is time, cost and context.",
 		"Reduck was faster on 2 of 5 tasks (IMDb, Reddit) and cheaper on 1 (Reddit). Chrome was faster on Trustpilot, Zillow and the 3-store price check, and cheaper on 4 of 5.",

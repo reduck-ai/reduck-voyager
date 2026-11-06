@@ -99,6 +99,14 @@
 {#if harnesses.length}
 	<section class="analysis">
 		<h2 class="section">Analysis</h2>
+		{#if NOTES.tldr.length}
+			<div class="tldr">
+				<h3>TL;DR</h3>
+				<ul>
+					{#each NOTES.tldr as point}<li>{point}</li>{/each}
+				</ul>
+			</div>
+		{/if}
 		{#each harnesses as h (h.id)}
 			<div class="harness">
 				<h3>{h.name} <span>{h.rows.length} {h.rows.length === 1 ? "task" : "tasks"} with both tools</span></h3>
@@ -249,6 +257,19 @@
 			font-weight: 400;
 			color: var(--ink-2);
 			font-size: 13px;
+		}
+	}
+	.tldr {
+		margin-bottom: 20px;
+		padding: 12px 16px;
+		border-left: 3px solid var(--brand);
+		border-radius: 6px;
+		background: var(--surface);
+		ul {
+			margin: 6px 0 0;
+			padding-left: 18px;
+			font-size: 14px;
+			line-height: 22px;
 		}
 	}
 	.budget {
