@@ -1,45 +1,48 @@
 <!--
-	A short analysis of the results, per agent harness: for each task, the latest trial of that
-	harness with both tools, who passed and how Reduck compares with Chrome on time, cost and
-	final context; then the typical ratio over the tasks both passed (a geometric mean, so one
+	A short analysis of the results, per agent harness and tool Reduck is set against (Hermes' own
+	browser on Hermes, Claude in Chrome on Claude Code): for each task, the latest trial of that
+	pair, who passed and how Reduck compares with its rival on time, cost and final context; then the typical ratio over the tasks both passed (a geometric mean, so one
 	outlier does not carry it); then the notes of whoever read the transcripts (analysis.ts).
 -->
 <script lang="ts">
 	import { NOTES } from "./analysis.ts";
 	import { clock } from "./chat/Timeline.svelte";
-	import { kTokens, type Run, type TaskTrials, type Trial } from "./run.ts";
+	import { kTokens, type Rival, type Run, type TaskTrials, type Trial } from "./run.ts";
 
 	let { tasks }: { tasks: TaskTrials[] } = $props();
 
-	const HARNESSES = [
-		{ id: "hermes", name: "Hermes", of: (t: Trial) => t.runs.some((r) => r.harness === "hermes") },
-		{ id: "claude-code", name: "Claude Code", of: (t: Trial) => !t.runs.some((r) => r.harness) }
+	const hermes = (t: Trial) => t.runs.every((r) => r.harness === "hermes");
+	const MATCHUPS: { id: string; name: string; rival: Rival; rivalName: string; of: (t: Trial) => boolean; notes: Record<string, { summary: string; why?: string[] }> }[] = [
+		{ id: "hermes-browser", name: "Hermes · Reduck vs Hermes' own browser", rival: "browser", rivalName: "Browser", of: hermes, notes: NOTES.tasks },
+		{ id: "claude-code", name: "Claude Code · Reduck vs Claude in Chrome", rival: "chrome", rivalName: "Chrome", of: (t: Trial) => !t.runs.some((r) => r.harness), notes: {} }
 	];
 
-	type Row = { task: TaskTrials; reduck: Run; chrome: Run };
+	type Row = { task: TaskTrials; reduck: Run; rival: Run };
 
-	/** Each task's latest trial of the harness with both tools. */
-	const rowsOf = (of: (t: Trial) => boolean): Row[] =>
+	/** Each task's latest trial of the harness that sets Reduck against this rival alone. */
+	const rowsOf = (of: (t: Trial) => boolean, rival: Rival): Row[] =>
 		tasks.flatMap((task) => {
-			const trial = task.trials.find((t) => of(t) && t.runs.length > 1);
+			const trial = task.trials.find(
+				(t) => of(t) && t.runs.length === 2 && t.runs.some((r) => r.arm === "reduck") && t.runs.some((r) => r.arm === rival)
+			);
 			const reduck = trial?.runs.find((r) => r.arm === "reduck");
-			const chrome = trial?.runs.find((r) => r.arm === "chrome");
-			return reduck && chrome ? [{ task, reduck, chrome }] : [];
+			const other = trial?.runs.find((r) => r.arm === rival);
+			return reduck && other ? [{ task, reduck, rival: other }] : [];
 		});
 
-	/** How many times Chrome's value Reduck's is: below 1, Reduck needed less. */
+	/** How many times the rival's value Reduck's is: below 1, Reduck needed less. */
 	const ratio = (r: Row, k: "wallMs" | "costUsd" | "context") =>
-		r.reduck[k] > 0 && r.chrome[k] > 0 ? r.reduck[k] / r.chrome[k] : null;
+		r.reduck[k] > 0 && r.rival[k] > 0 ? r.reduck[k] / r.rival[k] : null;
 
 	const geomean = (xs: number[]) =>
 		xs.length ? Math.exp(xs.reduce((s, x) => s + Math.log(x), 0) / xs.length) : null;
 
 	const harnesses = $derived(
-		HARNESSES.map((h) => {
-			const rows = rowsOf(h.of);
+		MATCHUPS.map((h) => {
+			const rows = rowsOf(h.of, h.rival);
 			// A run that went around its tool tests nothing: its task leaves the comparison.
 			const both = rows.filter(
-				(r) => r.reduck.verdict?.pass && r.chrome.verdict?.pass && !r.reduck.offTool && !r.chrome.offTool
+				(r) => r.reduck.verdict?.pass && r.rival.verdict?.pass && !r.reduck.offTool && !r.rival.offTool
 			);
 			const typical = (k: "wallMs" | "costUsd" | "context") =>
 				geomean(both.map((r) => ratio(r, k)).filter((x): x is number => x !== null));
@@ -51,14 +54,14 @@
 				both: both.length,
 				passed: {
 					reduck: rows.filter((r) => r.reduck.verdict?.pass).length,
-					chrome: rows.filter((r) => r.chrome.verdict?.pass).length
+					rival: rows.filter((r) => r.rival.verdict?.pass).length
 				},
 				typical: { time: typical("wallMs"), cost: typical("costUsd"), context: typical("context") }
 			};
 		}).filter((h) => h.rows.length)
 	);
 
-	/** A Reduck/Chrome ratio as people read it: "2.1× less" or "1.3× more". */
+	/** A Reduck/rival ratio as people read it: "2.1× less" or "1.3× more". */
 	const said = (x: number | null, less: string, more: string) =>
 		x === null
 			? "–"
@@ -90,9 +93,25 @@
 		})
 	);
 
+	/** Each task's latest Hermes run of its own browser, with the latest Hermes run of Reduck on
+	 *  that task, whatever trial each comes from: until a trial sets the browser against Reduck,
+	 *  the only way to read it next to Reduck. A task that has such a trial is in its own table
+	 *  instead. */
+	const solo = $derived(
+		tasks.flatMap((task) => {
+			const latestOf = (arm: Run["arm"]) =>
+				task.trials.flatMap((t) => t.runs).find((r) => r.harness === "hermes" && r.arm === arm);
+			const browser = latestOf("browser");
+			const paired = harnesses.some((h) => h.rival === "browser" && h.rows.some((r) => r.task.id === task.id));
+			if (!browser || paired) return [];
+			return [{ task, browser, reduck: latestOf("reduck") }];
+		})
+	);
+	const cell = (r: Run | undefined) => (r ? `${verdict(r)} ${clock(r.wallMs)} · $${r.costUsd.toFixed(2)}` : "–");
+
 	const offTool = (rows: Row[]) =>
 		rows.flatMap((r) =>
-			[r.reduck, r.chrome].filter((run) => run.offTool).map((run) => `${r.task.name} (${run.arm}): ${run.offTool}`)
+			[r.reduck, r.rival].filter((run) => run.offTool).map((run) => `${r.task.name} (${run.arm}): ${run.offTool}`)
 		);
 </script>
 
@@ -114,7 +133,7 @@
 					Reduck ran on the paired browser at <b>{concurrencyLabel(h.concurrency)}</b> (scripts at once) in these results.
 				</p>
 				<p class="summary">
-					Passed: <b>Reduck {h.passed.reduck}/{h.rows.length}</b>, Chrome {h.passed.chrome}/{h.rows.length}.
+					Passed: <b>Reduck {h.passed.reduck}/{h.rows.length}</b>, {h.rivalName} {h.passed.rival}/{h.rows.length}.
 					{#if h.both}
 						On the {h.both} {h.both === 1 ? "task" : "tasks"} both passed, Reduck took
 						<b class={tone(h.typical.time)}>{said(h.typical.time, "less time", "more time")}</b>, cost
@@ -133,7 +152,7 @@
 					<table>
 						<thead>
 							<tr>
-								<th>Task</th><th>Passed<br /><small>Reduck · Chrome</small></th><th>Time</th><th>Cost</th
+								<th>Task</th><th>Passed<br /><small>Reduck · {h.rivalName}</small></th><th>Time</th><th>Cost</th
 								><th>Final context</th>
 							</tr>
 						</thead>
@@ -148,24 +167,24 @@
 											>Reduck at concurrency {r.reduck.reduckConcurrency ?? "not recorded"}</small
 										></td
 									>
-									<td class="mono">{verdict(r.reduck)} · {verdict(r.chrome)}</td>
+									<td class="mono">{verdict(r.reduck)} · {verdict(r.rival)}</td>
 									<td class={tone(time)}
-										>{clock(r.reduck.wallMs)} vs {clock(r.chrome.wallMs)}<small>{said(time, "faster", "slower")}</small></td
+										>{clock(r.reduck.wallMs)} vs {clock(r.rival.wallMs)}<small>{said(time, "faster", "slower")}</small></td
 									>
 									<td class={tone(cost)}
-										>${r.reduck.costUsd.toFixed(2)} vs ${r.chrome.costUsd.toFixed(2)}<small
+										>${r.reduck.costUsd.toFixed(2)} vs ${r.rival.costUsd.toFixed(2)}<small
 											>{said(cost, "cheaper", "costlier")}</small
 										></td
 									>
 									<td class={tone(context)}
-										>{kTokens(r.reduck.context)} vs {kTokens(r.chrome.context)}<small
+										>{kTokens(r.reduck.context)} vs {kTokens(r.rival.context)}<small
 											>{said(context, "smaller", "larger")}</small
 										></td
 									>
 								</tr>
-								<!-- The notes were written from the Hermes transcripts, and their numbers are those runs'. -->
-								{#if h.id === "hermes" && NOTES.tasks[r.task.id]}
-									{@const note = NOTES.tasks[r.task.id]}
+								<!-- The notes were written from the transcripts of these very runs, and their numbers are those runs'. -->
+								{#if h.notes[r.task.id]}
+									{@const note = h.notes[r.task.id]}
 									<tr class="note">
 										<td colspan="5">
 											<p>{note.summary}</p>
@@ -186,11 +205,55 @@
 				</div>
 			</div>
 		{/each}
+		{#if solo.length}
+			<div class="harness">
+				<h3>
+					Hermes' own browser <span
+						>on the tasks with no trial against Reduck, next to the latest Hermes run of Reduck</span
+					>
+				</h3>
+				<p class="budget">
+					On these tasks no counted trial sets it against Reduck: each column is a separate run, hours apart on the same day.
+				</p>
+				<div class="wrap">
+					<table>
+						<thead>
+							<tr><th>Task</th><th>Hermes' browser</th><th>Reduck</th></tr>
+						</thead>
+						<tbody>
+							{#each solo as s (s.task.id)}
+								<tr>
+									<td>{s.task.name}<small>{s.browser.verdict?.detail ?? ""}</small></td>
+									<td class="mono">{cell(s.browser)}</td>
+									<td class="mono">{cell(s.reduck)}</td>
+								</tr>
+								{#if NOTES.tasks[s.task.id]}
+									{@const note = NOTES.tasks[s.task.id]}
+									<tr class="note">
+										<td colspan="3">
+											<p>{note.summary}</p>
+											{#if note.why?.length}
+												<details>
+													<summary>Why</summary>
+													<ul>
+														{#each note.why as w}<li>{w}</li>{/each}
+													</ul>
+												</details>
+											{/if}
+										</td>
+									</tr>
+								{/if}
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			</div>
+		{/if}
 		{#if budgets.length}
 			<div class="harness">
 				<h3>
 					Reduck by concurrency <span
-						>Hermes, the same task at each budget of the paired browser, Chrome left out</span
+						>Hermes, the same task at each budget of the paired browser, the other tools left out</span
 					>
 				</h3>
 				<div class="wrap">
