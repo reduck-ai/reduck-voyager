@@ -40,6 +40,7 @@ import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { parseArgs } from "node:util";
 import { parseSession, projectDir } from "./session.ts";
+import { reduckHeaders } from "./reduck-auth.ts";
 import { tasks, type Task, type Verdict } from "./task.ts";
 
 type Arm = "reduck" | "chrome";
@@ -80,16 +81,6 @@ const taken = new Set(
 		: []
 );
 
-/** Reduck credentials: an API key when set, else the Reduck CLI's OAuth token, refreshed by
- *  `whoami` because it lives one hour. */
-function reduckHeaders(): Record<string, string> {
-	if (process.env.REDUCK_API_KEY) return { "x-api-key": process.env.REDUCK_API_KEY };
-	execFileSync("npx", ["-y", "@reduck-ai/cli@latest", "whoami"], { stdio: "ignore" });
-	const config = JSON.parse(readFileSync(join(homedir(), ".config/reduck/config.json"), "utf8"));
-	return {
-		Authorization: `Bearer ${config.servers[REDUCK_MCP].tokens[REDUCK_MCP].access_token}`
-	};
-}
 
 function options(arm: Arm, cwd: string, abortController: AbortController): Options {
 	return {
@@ -105,7 +96,7 @@ function options(arm: Arm, cwd: string, abortController: AbortController): Optio
 		extraArgs: { "strict-mcp-config": null, [arm === "chrome" ? "chrome" : "no-chrome"]: null },
 		mcpServers:
 			arm === "reduck"
-				? { reduck: { type: "http", url: `${REDUCK_MCP}/mcp`, headers: reduckHeaders() } }
+				? { reduck: { type: "http", url: `${REDUCK_MCP}/mcp`, headers: reduckHeaders(REDUCK_MCP, timeoutMs + 10 * 60_000) } }
 				: {}
 	};
 }
@@ -161,6 +152,8 @@ async function run(task: Task, arm: Arm) {
 	} finally {
 		clearTimeout(timer);
 	}
+	// The session's time only: a check can run scripts of its own, which are no part of the run.
+	const wallMs = Date.now() - start;
 
 	// What the run produced: new files in ~/Downloads, and whatever it left in its cwd.
 	const produced = [
@@ -200,7 +193,7 @@ async function run(task: Task, arm: Arm) {
 		mcp: arm === "reduck" ? REDUCK_MCP : undefined,
 		verdict,
 		outcome: failure || (result?.subtype ?? "no result"),
-		wallMs: Date.now() - start,
+		wallMs,
 		turns: result?.num_turns ?? 0,
 		costUsd: result?.total_cost_usd ?? 0,
 		usage: result?.usage,

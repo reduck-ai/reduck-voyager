@@ -24,7 +24,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { index, PUBLISHED, runs, stageFile, withSession } from "./data.ts";
-import type { Run, RunWithSession } from "./replay/run.ts";
+import type { Run, RunWithSession, TaskTrials } from "./replay/run.ts";
 import { tasks } from "./task.ts";
 
 const DENY = join(import.meta.dirname, "tasks/private/deny.txt");
@@ -46,7 +46,8 @@ const denied = (id: string, text: string) => {
 
 /** Rewritten, not refused: Claude Code saves a large tool result under the home directory, in a
  *  folder named after the run's working directory, a temp folder, and the agent reads it back
- *  with Bash; Google's CAPTCHA page prints the visitor's IP (its `/sorry/` URL encodes it too).
+ *  with Bash; Google's CAPTCHA page prints the visitor's IP, in the browser's language (its
+ *  `/sorry/` URL encodes it too).
  *  An email address is masked wherever it appears, even one a stranger made public in a bio. */
 const TMP = realpathSync(tmpdir());
 const SCRUB: [string | RegExp, string][] = [
@@ -55,7 +56,8 @@ const SCRUB: [string | RegExp, string][] = [
 	[tmpdir(), "$TMPDIR"],
 	[TMP.replace(/[^a-zA-Z0-9]/g, "-"), "-TMPDIR"],
 	[/(https?:\/\/(?:www\.)?google\.[a-z.]+\/sorry\/)[^\s"\\]*/g, "$1…"],
-	[/(IP address: ?)[0-9a-f.:]+/gi, "$1…"],
+	// The label is in the browser's language: "IP address:", "Adresse IP :", "IP-Adresse:".
+	[/((?:IP[ -]?address|Adresse IP|IP-Adresse|Dirección IP|Indirizzo IP)\s*: ?)[0-9a-f.:]+/gi, "$1…"],
 	[/[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}\b/gi, "…@…"]
 ];
 const scrub = (text: string) =>
@@ -119,5 +121,18 @@ const listed: Run[] = [...texts.values()].map((text) => {
 	const { session: _, ...run }: RunWithSession = JSON.parse(text);
 	return run;
 });
-write(join(PUBLISHED, "tasks.json"), JSON.stringify(index(listed, allTasks)));
+// A published task whose file this machine lacks (a private one, kept by whoever ran it) keeps
+// its name and prompt from the index already published, so approving here never drops it.
+const indexFile = join(PUBLISHED, "tasks.json");
+const before: TaskTrials[] = existsSync(indexFile) ? JSON.parse(readFileSync(indexFile, "utf8")) : [];
+// The index keeps no `pinned`: a task listed above every task this machine has a file for was
+// pinned (index() puts pinned tasks first), so it stays first.
+const firstKnown = before.findIndex((t) => taskOf.has(t.id));
+const known = [
+	...allTasks,
+	...before
+		.filter((t) => !taskOf.has(t.id))
+		.map(({ id, name, prompt }) => ({ id, name, prompt, pinned: firstKnown === -1 || before.findIndex((t) => t.id === id) < firstKnown }))
+];
+write(indexFile, JSON.stringify(index(listed, known)));
 console.log(`${ids.length} approved, ${listed.length} published → ${PUBLISHED}`);

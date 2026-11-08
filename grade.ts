@@ -15,7 +15,7 @@ import { parseSession } from "./session.ts";
 import { tasks, type Verdict } from "./task.ts";
 
 const [id = "", grade, detail] = process.argv.slice(2);
-const [, folder, taskId, arm] = id.match(/^([^/]+)\/(.+)\.(reduck|chrome)$/) ?? [];
+const [, folder, taskId, arm] = id.match(/^([^/]+)\/(.+)\.(reduck|chrome|browser)$/) ?? [];
 const byPerson = grade !== undefined;
 if (!folder || (byPerson && ((grade !== "pass" && grade !== "fail") || !detail)))
 	throw new Error('usage: pnpm grade <folder>/<task>.<arm> [pass|fail "<why>"]');

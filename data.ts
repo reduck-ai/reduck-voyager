@@ -11,7 +11,8 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Run, RunWithSession, Stage, TaskTrials } from "./replay/run.ts";
-import { parseSession } from "./session.ts";
+import { audit, offTool } from "./audit.ts";
+import { parseSession, type Session } from "./session.ts";
 import type { Task } from "./task.ts";
 
 const RUNS = join(import.meta.dirname, "runs");
@@ -44,6 +45,8 @@ export function runs(): Recorded[] {
 				wallMs: row.wallMs,
 				costUsd: row.costUsd,
 				answer: row.answer,
+				...(row.harness === "hermes" ? { harness: "hermes" as const } : {}),
+				...(row.reduckConcurrency ? { reduckConcurrency: row.reduckConcurrency } : {}),
 				transcript: row.session
 			}));
 	});
@@ -99,7 +102,20 @@ export function index(runs: Run[], tasks: Task[]): TaskTrials[] {
 		);
 }
 
+/** A Hermes run's transcript is the `session.json` hermes.ts already wrote in this shape (see
+ *  hermes-session.ts); a Claude Code run's is its JSONL, parsed here. */
+const readSession = (transcript: string): Session =>
+	transcript.endsWith(".json")
+		? JSON.parse(readFileSync(transcript, "utf8"))
+		: parseSession(transcript);
+
 export function withSession({ transcript, ...run }: Recorded): RunWithSession {
-	const { ask, start, durationMs, steps, models, context } = parseSession(transcript);
-	return { ...run, context: context.end, session: { ask, start, durationMs, steps, models } };
+	const { ask, start, durationMs, steps, models, context } = readSession(transcript);
+	const offtool = offTool(run.arm, audit(run.arm, steps));
+	return {
+		...run,
+		context: context.end,
+		...(offtool ? { offTool: offtool } : {}),
+		session: { ask, start, durationMs, steps, models }
+	};
 }

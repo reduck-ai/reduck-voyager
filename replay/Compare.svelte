@@ -22,7 +22,7 @@
 	import Screen, { receive, send } from "./chat/Screen.svelte";
 	import Timeline, { clock } from "./chat/Timeline.svelte";
 	import {
-		ARM_NAMES,
+		armName,
 		grader,
 		kTokens,
 		modelName,
@@ -80,7 +80,7 @@
 
 	const result = $derived(runs.length === 2 ? outcome(runs) : null);
 	const marks = $derived(
-		runs.map((r) => ({ at: r.session.durationMs, label: ARM_NAMES[r.arm] }))
+		runs.map((r) => ({ at: r.session.durationMs, label: armName(r) }))
 	);
 </script>
 
@@ -104,13 +104,13 @@
 				{#if collapsed === ref(run)}
 					<button class="rail" onclick={() => (collapsed = null)} title="Expand">
 						{@render panel(side(i))}
-						<span>{ARM_NAMES[run.arm]}</span>
+						<span>{armName(run)}</span>
 						{#if done}<span>{verdictLabel(run)}</span>{/if}
 					</button>
 				{:else}
 				<header>
 					<span>
-						<strong class="arm" style:--arm="var(--{run.arm})">{ARM_NAMES[run.arm]}</strong>
+						<strong class="arm" style:--arm="var(--{run.arm})">{armName(run)}</strong>
 						<span class="model">· {run.session.models.map(modelName).join(", ")}</span>
 						{#if import.meta.env.DEV}<span class="at">{run.stage}</span>{/if}
 					</span>
@@ -164,7 +164,7 @@
 					{@const screen = screenAt(shown.session, t)}
 					<div class="stage" in:receive={{ key: shown.session }} out:send={{ key: shown.session }}>
 						<header>
-							<strong>{ARM_NAMES[shown.arm]}</strong>
+							<strong>{armName(shown)}</strong>
 							<button onclick={() => (staged = null)} aria-label="Back to picture in picture">
 								<FontAwesomeIcon icon={faXmark} />
 							</button>
@@ -179,7 +179,7 @@
 			<div class="versus" transition:scale={{ start: 0.9, duration: 300 }}>
 				<div class="winner">
 					<FontAwesomeIcon icon={faMedal} />
-					{ARM_NAMES[result.winner.arm]} wins
+					{armName(result.winner)} wins
 				</div>
 				{#each result.lines as line}<div>{#if line.n}<b>{line.n}</b>{/if} {line.word}</div>{/each}
 			</div>
