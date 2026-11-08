@@ -13,7 +13,9 @@
  * The deferral calls themselves stay steps, as Claude Code's `ToolSearch` does.
  *
  * An image an MCP tool returns (a screenshot) is cached on disk and named in the result as
- * `MEDIA:<path>`; it is read back as the step's image.
+ * `MEDIA:<path>`; it is read back as the step's image. `browser_exec` names its screenshot as
+ * `"screenshot_path"`, and writes every one of a session to the same file: that file is the last
+ * one taken, so only the last step naming it gets it.
  */
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { extname } from "node:path";
@@ -71,9 +73,11 @@ type Usage = {
 
 const iso = (seconds: number) => new Date(seconds * 1000).toISOString();
 
-function images(text: string): Image[] {
+const SCREENSHOT_PATH = /"screenshot_path":\s*"([^"]+?\.(?:png|jpe?g|webp|gif))"/gi;
+
+function images(text: string, paths: RegExp = /MEDIA:(\S+?\.(?:png|jpe?g|webp|gif))/gi): Image[] {
 	const found: Image[] = [];
-	for (const [, path] of text.matchAll(/MEDIA:(\S+?\.(?:png|jpe?g|webp|gif))/gi)) {
+	for (const [, path] of text.matchAll(paths)) {
 		if (!existsSync(path) || statSync(path).size > 8 * 1024 * 1024) continue;
 		const ext = extname(path).slice(1).toLowerCase();
 		found.push({
@@ -132,6 +136,8 @@ export function parseHermesSession(db: string, sessionId: string, callsPath: str
 	const ask = rows.find((r) => r.role === "user")?.content ?? "";
 	const steps: Step[] = [];
 	const pending = new Map<string, ToolStep[]>();
+	/** The last step that names each `browser_exec` screenshot file. */
+	const lastShot = new Map<string, ToolStep>();
 	for (const row of rows) {
 		if (row.role === "assistant") {
 			if (row.content?.trim()) steps.push({ kind: "text", at: iso(row.timestamp), text: row.content });
@@ -158,10 +164,14 @@ export function parseHermesSession(db: string, sessionId: string, callsPath: str
 			step.end = iso(row.timestamp);
 			step.result = text;
 			step.images = images(text);
+			for (const [, path] of text.matchAll(SCREENSHOT_PATH)) lastShot.set(path, step);
 			step.error = /"is_error":\s*true|^Error:|"error":\s*"(?!null)/m.test(text.slice(0, 2000));
 			if (row.tool_name && step.tool === "tool_call") step.tool = row.tool_name;
 		}
 	}
+
+	for (const [path, step] of lastShot)
+		step.images.push(...images(`"screenshot_path": "${path}"`, SCREENSHOT_PATH));
 
 	const callRows = existsSync(callsPath)
 		? readFileSync(callsPath, "utf8")

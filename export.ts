@@ -46,7 +46,8 @@ const denied = (id: string, text: string) => {
 
 /** Rewritten, not refused: Claude Code saves a large tool result under the home directory, in a
  *  folder named after the run's working directory, a temp folder, and the agent reads it back
- *  with Bash; Google's CAPTCHA page prints the visitor's IP (its `/sorry/` URL encodes it too).
+ *  with Bash; Google's CAPTCHA page prints the visitor's IP, in the browser's language (its
+ *  `/sorry/` URL encodes it too).
  *  An email address is masked wherever it appears, even one a stranger made public in a bio. */
 const TMP = realpathSync(tmpdir());
 const SCRUB: [string | RegExp, string][] = [
@@ -55,7 +56,8 @@ const SCRUB: [string | RegExp, string][] = [
 	[tmpdir(), "$TMPDIR"],
 	[TMP.replace(/[^a-zA-Z0-9]/g, "-"), "-TMPDIR"],
 	[/(https?:\/\/(?:www\.)?google\.[a-z.]+\/sorry\/)[^\s"\\]*/g, "$1…"],
-	[/(IP address: ?)[0-9a-f.:]+/gi, "$1…"],
+	// The label is in the browser's language: "IP address:", "Adresse IP :", "IP-Adresse:".
+	[/((?:IP[ -]?address|Adresse IP|IP-Adresse|Dirección IP|Indirizzo IP)\s*: ?)[0-9a-f.:]+/gi, "$1…"],
 	[/[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}\b/gi, "…@…"]
 ];
 const scrub = (text: string) =>

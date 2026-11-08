@@ -1,8 +1,9 @@
 /**
  * Temporary CLI: the same benchmark as `run.ts`, on the Hermes Agent harness instead of Claude
- * Code. Each task runs once per arm, one run at a time, with the arm's one browser MCP.
+ * Code. Each task runs once per arm, one run at a time, with the arm's one browser tool.
  *
- *   node hermes.ts                                   # every task, both arms
+ *   node hermes.ts                                   # every task, every arm
+ *   node hermes.ts --task reddit-seo-post,imdb-deep-filter --arm reduck,browser
  *   node hermes.ts --task reddit-seo-post --arm reduck --timeout 10
  *   node hermes.ts --task reddit-seo-post --arm chrome --trial hermes-2026-11-06T…
  *   node hermes.ts --prompt "Open example.com and give its title" --arm chrome   # a smoke run
@@ -12,18 +13,23 @@
  *
  * Setup it expects (done once, by hand):
  * - Hermes installed (`hermes` on PATH), and two profiles made with
- *   `hermes profile create voyagerreduck --no-skills --no-alias` (and `voyagerchrome`), whose
- *   `.env` holds ANTHROPIC_API_KEY (here a symlink to ~/.hermes/.env).
+ *   `hermes profile create voyagerreduck --no-skills --no-alias` (and `voyagerchrome`,
+ *   `voyagerbrowser`), whose `.env` holds ANTHROPIC_API_KEY (here a symlink to ~/.hermes/.env).
  * - The Reduck CLI logged in, or REDUCK_API_KEY, as for `run.ts`.
  * - For the chrome arm, Claude Code installed: `claude --claude-in-chrome-mcp` is the same
- *   stdio server Claude Code runs for `--chrome`, so both harnesses get the same 20 tools.
+ *   stdio server Claude Code runs for `--chrome`, so both harnesses get the same tools.
+ * - For the browser arm, nothing more: it is Hermes' own `browser` toolset (`browser_exec`, on
+ *   Browser Use's browser-harness, over CDP), on a copy of the Chrome profile the other arms
+ *   drive (`browser.use_real_profile`), so it is signed in to the same sites, in a window
+ *   (HEADED). Claude Code plays no part in it.
  *
  * How a run is kept fair to the Claude Code one:
  * - Same prompt, prefixed with the same arm sentence; a fresh empty working directory.
- * - One browser tool: the profile's config holds that arm's MCP server only, and `-t` enables
- *   Hermes' terminal, file and todo tools plus that server. Hermes' own browser, web search,
- *   vision, memory, skills, delegation and clarify toolsets stay off (Claude Code's arms keep
- *   Bash/Read/Write; its WebSearch/WebFetch were never used in a published run).
+ * - One browser tool: `-t` enables Hermes' terminal, file and todo tools plus the arm's one:
+ *   its MCP server, which the profile's config holds alone, or Hermes' browser toolset. Hermes'
+ *   web search, vision, computer use, memory, skills, delegation and clarify toolsets stay off
+ *   (Claude Code's arms keep Bash/Read/Write; its WebSearch/WebFetch were never used in a
+ *   published run).
  * - `--ignore-rules` leaves out SOUL.md, AGENTS.md and memory, as `settingSources: []` does.
  * - Hermes runs the agent in a host gateway daemon that `chat` starts, that serves every profile
  *   and that outlives it. It is stopped before and after each run, so each run starts a new one that
@@ -48,14 +54,29 @@ import { basename, join } from "node:path";
 import { parseArgs } from "node:util";
 import { fault } from "./faults.ts";
 import { hermesEstimate, parseHermesSession } from "./hermes-session.ts";
+import { reduckHeaders } from "./reduck-auth.ts";
 import { tasks, type Task, type Verdict } from "./task.ts";
 
-type Arm = "reduck" | "chrome";
+type Arm = "reduck" | "chrome" | "browser";
 const ARMS: Record<Arm, string> = {
 	reduck: "Use Reduck MCP.",
-	chrome: "Use Claude for Chrome MCP."
+	chrome: "Use Claude for Chrome MCP.",
+	browser: "Use your browser tool."
 };
-const PROFILES: Record<Arm, string> = { reduck: "voyagerreduck", chrome: "voyagerchrome" };
+const PROFILES: Record<Arm, string> = {
+	reduck: "voyagerreduck",
+	chrome: "voyagerchrome",
+	browser: "voyagerbrowser"
+};
+/** The Chrome profile the other arms drive (the one with the Reduck extension and Claude in
+ *  Chrome), which the browser arm copies: a directory under Chrome's user-data dir. */
+const CHROME_PROFILE = process.env.VOYAGER_CHROME_PROFILE ?? "Default";
+/** Hermes runs its browser headless by default, and a headless Chrome names itself
+ *  HeadlessChrome: Google, Reddit, IMDb, Trustpilot and Zillow all refused it (seen
+ *  2026-11-06). The other arms drive a Chrome with a window, so the browser
+ *  arm gets one too, with Hermes' own `browser.headed`. VOYAGER_BROWSER_HEADLESS=1 runs the
+ *  default. */
+const HEADED = !process.env.VOYAGER_BROWSER_HEADLESS;
 const MODEL = process.env.HERMES_MODEL ?? "claude-sonnet-5-5";
 const TOOLSETS = ["terminal", "file", "todo"];
 
@@ -97,25 +118,17 @@ const taken = new Set(
 
 const profileHome = (arm: Arm) => join(homedir(), ".hermes", "profiles", PROFILES[arm]);
 
-/** Reduck credentials, as in run.ts: an API key when set, else the Reduck CLI's OAuth token,
- *  refreshed by `whoami` because it lives one hour. */
-function reduckHeaders(): Record<string, string> {
-	if (process.env.REDUCK_API_KEY) return { "x-api-key": process.env.REDUCK_API_KEY };
-	execFileSync("npx", ["-y", "@reduck-ai/cli@latest", "whoami"], { stdio: "ignore" });
-	const config = JSON.parse(readFileSync(join(homedir(), ".config/reduck/config.json"), "utf8"));
-	return {
-		Authorization: `Bearer ${config.servers[REDUCK_MCP].tokens[REDUCK_MCP].access_token}`
-	};
-}
 
-/** The arm's profile config: the model, its one MCP server, nothing borrowed from other
+/** The arm's profile config: the model, its one browser tool, nothing borrowed from other
  *  logins, and the hook that records each API call's usage into the run's folder. JSON is
  *  YAML, so Hermes reads it as is. */
 function writeConfig(arm: Arm, calls: string) {
 	const mcp =
 		arm === "reduck"
-			? { reduck: { url: `${REDUCK_MCP}/mcp`, headers: reduckHeaders() } }
-			: { chrome: { command: "claude", args: ["--claude-in-chrome-mcp"] } };
+			? { reduck: { url: `${REDUCK_MCP}/mcp`, headers: reduckHeaders(REDUCK_MCP, timeoutMs + 10 * 60_000) } }
+			: arm === "chrome"
+				? { chrome: { command: "claude", args: ["--claude-in-chrome-mcp"] } }
+				: {};
 	const hook = `python3 -I ${join(import.meta.dirname, "hermes-hook.py")} ${calls}`;
 	const config = {
 		_config_version: 52,
@@ -129,7 +142,20 @@ function writeConfig(arm: Arm, calls: string) {
 		agent: { run_budget_seconds: Math.round(timeoutMs / 1000) },
 		hooks: { post_api_request: [{ command: hook, timeout: 10 }] },
 		hooks_auto_accept: true,
-		mcp_servers: mcp
+		mcp_servers: mcp,
+		// Hermes' defaults but three: the browser is local (no cloud provider found from a key in
+		// the environment), it is a copy of the profile the other arms drive, so the same sign-ins,
+		// and it has a window (HEADED).
+		...(arm === "browser"
+			? {
+					browser: {
+						cloud_provider: "local",
+						use_real_profile: true,
+						real_profile_pin: CHROME_PROFILE,
+						headed: HEADED
+					}
+				}
+			: {})
 	};
 	writeFileSync(join(profileHome(arm), "config.yaml"), JSON.stringify(config, null, 1), {
 		mode: 0o600
@@ -145,7 +171,7 @@ function stopGateway() {
 	} catch {
 		// Nothing was running.
 	}
-	for (const home of [join(homedir(), ".hermes"), ...(["reduck", "chrome"] as Arm[]).map(profileHome)])
+	for (const home of [join(homedir(), ".hermes"), ...(Object.keys(PROFILES) as Arm[]).map(profileHome)])
 		rmSync(join(home, "gateway.parked"), { force: true });
 }
 
@@ -188,7 +214,7 @@ function chat(arm: Arm, prompt: string, cwd: string, events: string, stderr: str
 		"--source", "tool",
 		"-m", MODEL,
 		"--provider", "anthropic",
-		"-t", [...TOOLSETS, `mcp-${arm}`].join(",")
+		"-t", [...TOOLSETS, arm === "browser" ? "browser" : `mcp-${arm}`].join(",")
 	];
 	return new Promise<{ result: Result | null; timedOut: boolean; code: number | null }>((resolve) => {
 		const child = spawn("hermes", args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
@@ -245,11 +271,22 @@ async function run(task: Task, arm: Arm) {
 	const wallMs = Date.now() - start;
 	stopGateway();
 
+	const filesIn = (dir: string) =>
+		existsSync(dir)
+			? readdirSync(dir, { recursive: true, withFileTypes: true })
+					.filter((e) => e.isFile())
+					.map((e) => join(e.parentPath, e.name))
+			: [];
 	const produced = [
 		...[...downloads()].filter((f) => !before.has(f) && statSync(f).mtimeMs >= start - 1000),
-		...readdirSync(cwd, { recursive: true, withFileTypes: true })
-			.filter((e) => e.isFile())
-			.map((e) => join(e.parentPath, e.name))
+		...filesIn(cwd),
+		// browser_exec keeps a workspace per session, outside the run's working directory, where
+		// the agent can save what it fetched: a download as much as one in ~/Downloads.
+		...(arm === "browser"
+			? filesIn(join(profileHome(arm), "cache", "browser-use", "workspace")).filter(
+					(f) => statSync(f).mtimeMs >= start - 1000
+				)
+			: [])
 	];
 	const kept = produced.map((f, i) => {
 		const to = join(files, `${i}-${basename(f)}`);
@@ -290,6 +327,7 @@ async function run(task: Task, arm: Arm) {
 		harness: "hermes",
 		model: MODEL,
 		mcp: arm === "reduck" ? REDUCK_MCP : undefined,
+		browserHeaded: arm === "browser" ? HEADED : undefined,
 		// The paired browser's concurrency budget, as set on reduck.ai: no CLI reads it, so the
 		// batch states it.
 		reduckConcurrency:
@@ -331,9 +369,13 @@ async function run(task: Task, arm: Arm) {
 	);
 }
 
-for (const task of all.filter((t) => !flags.task || t.id === flags.task)) {
-	for (const arm of ["reduck", "chrome"] as Arm[]) {
-		if (flags.arm && flags.arm !== arm) continue;
+/** `--task` and `--arm` each take one name or a comma-separated list. */
+const only = (flag: string | undefined) => (flag ? new Set(flag.split(",")) : null);
+const onlyTasks = only(flags.task);
+const onlyArms = only(flags.arm);
+for (const task of all.filter((t) => !onlyTasks || onlyTasks.has(t.id))) {
+	for (const arm of Object.keys(ARMS) as Arm[]) {
+		if (onlyArms && !onlyArms.has(arm)) continue;
 		if (taken.has(`${task.id}.${arm}`)) {
 			console.log(`${`${task.id}.${arm}`.padEnd(28)} SKIP  trial ${flags.trial} already has it`);
 			continue;

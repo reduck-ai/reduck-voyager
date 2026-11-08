@@ -48,7 +48,7 @@ A task in `tasks/` is public: its file is committed and its runs can go on the s
 
 ## Run
 
-Requirements: Node 22.18+, pnpm, [Claude Code](https://claude.com/claude-code), Chrome with the Reduck extension paired and Claude in Chrome installed. Both arms, and the `requires` checks, drive the same Chrome profile, so its sign-ins are the test fixture.
+Requirements: Node 22.18+, pnpm, [Claude Code](https://claude.com/claude-code), `pdftotext` (poppler: `brew install poppler`) for the checks that read a PDF, Chrome with the Reduck extension paired and Claude in Chrome installed. Both arms, and the `requires` checks, drive the same Chrome profile, so its sign-ins are the test fixture.
 
 ```sh
 pnpm install

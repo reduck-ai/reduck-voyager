@@ -16,6 +16,11 @@ const row = rows.find((r) => r.task === taskId && r.arm === arm);
 const task = (await tasks()).find((t) => t.id === taskId);
 if (!row || !task?.check) throw new Error(`no ${taskId}.${arm} in ${trial}, or no check`);
 const session = JSON.parse(readFileSync(join(import.meta.dirname, "runs", trial, `${taskId}.${arm}`, "session.json"), "utf8"));
-row.verdict = await task.check({ answer: row.answer, session, files: [] });
+const kept = join(import.meta.dirname, "runs", trial, `${taskId}.${arm}`, "files");
+row.verdict = await task.check({
+	answer: row.answer,
+	session,
+	files: (row.files ?? []).map((f: string) => join(kept, f))
+});
 writeFileSync(file, rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
 console.log(`${taskId}.${arm}`, JSON.stringify(row.verdict));
