@@ -9,7 +9,8 @@
 	import { clock } from "./chat/Timeline.svelte";
 	import { kTokens, type Rival, type Run, type TaskTrials, type Trial } from "./run.ts";
 
-	let { tasks }: { tasks: TaskTrials[] } = $props();
+	/** `notes`: show the written analysis (TL;DR, findings, fixes), which is about the Hermes trial. */
+	let { tasks, notes = true }: { tasks: TaskTrials[]; notes?: boolean } = $props();
 
 	const hermes = (t: Trial) => t.runs.every((r) => r.harness === "hermes");
 	const MATCHUPS: { id: string; name: string; rival: Rival; rivalName: string; of: (t: Trial) => boolean; notes: Record<string, { summary: string; why?: string[] }> }[] = [
@@ -118,7 +119,7 @@
 {#if harnesses.length}
 	<section class="analysis">
 		<h2 class="section">Analysis</h2>
-		{#if NOTES.tldr.length}
+		{#if notes && NOTES.tldr.length}
 			<div class="tldr">
 				<h3>TL;DR</h3>
 				<ul>
@@ -279,7 +280,7 @@
 				</div>
 			</div>
 		{/if}
-		{#if NOTES.findings.length}
+		{#if notes && NOTES.findings.length}
 			<div class="findings">
 				<h3>What the transcripts show</h3>
 				<ul>
@@ -288,7 +289,7 @@
 				<p class="as-of">Read on {NOTES.asOf}. Every cell is one run: a spread needs the trials repeated.</p>
 			</div>
 		{/if}
-		{#if NOTES.fixes.length}
+		{#if notes && NOTES.fixes.length}
 			<div class="findings fixes">
 				<h3>What Reduck should fix</h3>
 				<ol>

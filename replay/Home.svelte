@@ -11,7 +11,6 @@
 <script lang="ts">
 	import { faMedal, faPlay } from "@fortawesome/free-solid-svg-icons";
 	import { FontAwesomeIcon } from "@fortawesome/svelte-fontawesome";
-	import { untrack } from "svelte";
 	import { SvelteSet } from "svelte/reactivity";
 	import Analysis from "./Analysis.svelte";
 	import { clock } from "./chat/Timeline.svelte";
@@ -35,13 +34,29 @@
 
 	let { tasks, stage }: { tasks: TaskTrials[]; stage?: Stage } = $props();
 
-	let picked = $state(untrack(() => Object.fromEntries(tasks.map((t) => [t.id, latest(t).id]))));
-	const boards = $derived(
-		boardsOf(tasks).map(({ harness, rival }) => {
-			const board = scoreboard(tasks, harness, rival);
-			return { board, headline: lead(board) };
-		})
+	/** The page in parts, one per harness, Hermes first: each with its tasks cut to that harness's
+	 *  trials, so its scoreboards, analysis and cards read those trials alone. A task run on both
+	 *  harnesses has a card in each part. */
+	const only = (of: (t: Trial) => boolean) =>
+		tasks.map((t) => ({ ...t, trials: t.trials.filter(of) })).filter((t) => t.trials.length);
+	const parts = $derived(
+		[
+			{ id: "hermes", name: "Hermes", tasks: only((t) => t.runs.every((r) => r.harness === "hermes")) },
+			{ id: "claude-code", name: "Claude Code", tasks: only((t) => t.runs.every((r) => !r.harness)) }
+		]
+			.filter((p) => p.tasks.length)
+			.map((p) => ({
+				...p,
+				boards: boardsOf(p.tasks).map(({ harness, rival }) => {
+					const board = scoreboard(p.tasks, harness, rival);
+					return { board, headline: lead(board) };
+				})
+			}))
 	);
+	/** The trial each card shows, by part and task; a card shows its latest until one is picked. */
+	let picked = $state<Record<string, string>>({});
+	const shown = (part: string, task: TaskTrials) =>
+		task.trials.find((t) => t.id === picked[`${part}/${task.id}`]) ?? latest(task);
 	/** The summary at the top: the first board's pair, one row per task with a trial of that pair,
 	 *  each tool's result and which did better. A run that went around its tool does not count as a
 	 *  pass here, as on the boards. */
@@ -146,12 +161,14 @@
 		</section>
 	{/if}
 
-	{#each boards as { board, headline }, i (`${board.harness ?? "claude-code"}-${board.rival}`)}
+	{#each parts as part, p (part.id)}
+	{#if parts.length > 1}<h2 class="part">{part.name}</h2>{/if}
+	{#each part.boards as { board, headline }, i (`${board.harness ?? "claude-code"}-${board.rival}`)}
 	<section class="board">
 		<!-- A table to a screen reader; the rows stay grids, so a phone can fold them. -->
-		<div role="table" aria-labelledby="metrics-{i}">
+		<div role="table" aria-labelledby="metrics-{p}-{i}">
 			<div class="row head" role="row">
-				<span role="columnheader"><h2 id="metrics-{i}">Key metrics · {harnessName(board.harness)} · Reduck vs {board.rival === "browser" ? "its own browser" : "Claude in Chrome"}</h2></span><span role="columnheader"
+				<span role="columnheader"><h2 id="metrics-{p}-{i}">Key metrics · {harnessName(board.harness)} · Reduck vs {board.rival === "browser" ? "its own browser" : "Claude in Chrome"}</h2></span><span role="columnheader"
 					>Passed</span
 				><span role="columnheader">Avg time*</span><span role="columnheader">Avg cost*</span>
 			</div>
@@ -186,12 +203,12 @@
 	</section>
 	{/each}
 
-	<Analysis {tasks} />
+	<Analysis tasks={part.tasks} notes={part.id === "hermes"} />
 
-	<h2 class="section">Tasks <span>{tasks.length}</span></h2>
+	<h2 class="section">Tasks <span>{part.tasks.length}</span></h2>
 
-	{#each tasks as task (task.id)}
-		{@const trial = task.trials.find((t) => t.id === picked[task.id])!}
+	{#each part.tasks as task (task.id)}
+		{@const trial = shown(part.id, task)}
 		{@const result = outcome(trial.runs)}
 		{@const longest = Math.max(...trial.runs.map((r) => r.wallMs))}
 		<article>
@@ -250,8 +267,12 @@
 
 			<footer>
 				{#if task.trials.length > 1}
-					<select bind:value={picked[task.id]} aria-label="Run">
-						{#each task.trials as t (t.id)}<option value={t.id}>{day(t)}{t.runs.some((r) => r.harness) ? " · Hermes" : " · Claude Code"}</option>{/each}
+					<select
+						value={trial.id}
+						onchange={(e) => (picked[`${part.id}/${task.id}`] = e.currentTarget.value)}
+						aria-label="Run"
+					>
+						{#each task.trials as t (t.id)}<option value={t.id}>{day(t)}</option>{/each}
 					</select>
 				{:else}
 					<span>{day(trial)}</span>
@@ -259,6 +280,7 @@
 				<a class="open" href={replay(trial)}><FontAwesomeIcon icon={faPlay} /> Replay</a>
 			</footer>
 		</article>
+	{/each}
 	{/each}
 </main>
 
@@ -350,6 +372,13 @@
 		height: 8px;
 		border-radius: 50%;
 		background: var(--arm);
+	}
+	.part {
+		margin: 40px 0 14px;
+		padding-top: 18px;
+		border-top: 1px solid var(--line);
+		font-size: 20px;
+		font-weight: 600;
 	}
 	.summary {
 		margin-bottom: 28px;
