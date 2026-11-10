@@ -11,15 +11,13 @@
 <script lang="ts">
 	import { faMedal, faPlay } from "@fortawesome/free-solid-svg-icons";
 	import { FontAwesomeIcon } from "@fortawesome/svelte-fontawesome";
+	import { untrack } from "svelte";
 	import { SvelteSet } from "svelte/reactivity";
-	import Analysis from "./Analysis.svelte";
 	import { clock } from "./chat/Timeline.svelte";
 	import {
-		armName,
+		ARM_NAMES,
 		day,
 		grader,
-		boardsOf,
-		harnessName,
 		latest,
 		lead,
 		outcome,
@@ -27,65 +25,14 @@
 		verdictLabel,
 		type Stage,
 		type TaskTrials,
-		type Trial,
-		type Run,
-		pits
+		type Trial
 	} from "./run.ts";
 
 	let { tasks, stage }: { tasks: TaskTrials[]; stage?: Stage } = $props();
 
-	/** The page in parts, one per harness, Hermes first: each with its tasks cut to that harness's
-	 *  trials, so its scoreboards, analysis and cards read those trials alone. A task run on both
-	 *  harnesses has a card in each part. */
-	const only = (of: (t: Trial) => boolean) =>
-		tasks.map((t) => ({ ...t, trials: t.trials.filter(of) })).filter((t) => t.trials.length);
-	const parts = $derived(
-		[
-			{ id: "hermes", name: "Hermes", tasks: only((t) => t.runs.every((r) => r.harness === "hermes")) },
-			{ id: "claude-code", name: "Claude Code", tasks: only((t) => t.runs.every((r) => !r.harness)) }
-		]
-			.filter((p) => p.tasks.length)
-			.map((p) => ({
-				...p,
-				boards: boardsOf(p.tasks).map(({ harness, rival }) => {
-					const board = scoreboard(p.tasks, harness, rival);
-					return { board, headline: lead(board) };
-				})
-			}))
-	);
-	/** The trial each card shows, by part and task; a card shows its latest until one is picked. */
-	let picked = $state<Record<string, string>>({});
-	const shown = (part: string, task: TaskTrials) =>
-		task.trials.find((t) => t.id === picked[`${part}/${task.id}`]) ?? latest(task);
-	/** The summary at the top: the first board's pair, one row per task with a trial of that pair,
-	 *  each tool's result and which did better. A run that went around its tool does not count as a
-	 *  pass here, as on the boards. */
-	const summary = $derived.by(() => {
-		const first = boardsOf(tasks)[0];
-		if (!first) return null;
-		const { harness, rival } = first;
-		const rows = tasks.flatMap((task) => {
-			const trial = task.trials.find((t) => pits(t, harness, rival));
-			const reduck = trial?.runs.find((r) => r.arm === "reduck");
-			const other = trial?.runs.find((r) => r.arm === rival);
-			if (!trial || !reduck || !other) return [];
-			const ok = (r: Run) => !!r.verdict?.pass && !r.offTool;
-			let better: { arm: Run["arm"] | null; text: string };
-			if (ok(reduck) && ok(other)) {
-				const [fast, slow] = reduck.wallMs <= other.wallMs ? [reduck, other] : [other, reduck];
-				const n = slow.wallMs / fast.wallMs;
-				better = n < 1.1 ? { arm: null, text: "Tie on time" } : { arm: fast.arm, text: `${n.toFixed(1)}× faster` };
-			} else if (ok(reduck) || ok(other)) {
-				const winner = ok(reduck) ? reduck : other;
-				const loser = winner === reduck ? other : reduck;
-				better = { arm: winner.arm, text: loser.offTool ? "the other went around its tool" : "the other failed" };
-			} else better = { arm: null, text: "Neither passed" };
-			return [{ task, trial, reduck, other, better }];
-		});
-		return { harness, rival, rows };
-	});
-	const cell = (r: Run) => (r.offTool ? "⚠" : r.verdict ? (r.verdict.pass ? "✓" : "✗") : "–");
-
+	let picked = $state(untrack(() => Object.fromEntries(tasks.map((t) => [t.id, latest(t).id]))));
+	const board = $derived(scoreboard(tasks));
+	const headline = $derived(lead(board));
 	/** Tasks whose prompt is cut, those shown whole, and runs whose grade's reason is shown. */
 	const cut = new SvelteSet<string>();
 	const prompts = new SvelteSet<string>();
@@ -123,58 +70,17 @@
 		</p>
 	</header>
 
-	{#if summary?.rows.length}
-		<section class="summary" aria-labelledby="summary-title">
-			<h2 id="summary-title">
-				Summary · {harnessName(summary.harness)} · Reduck vs {summary.rival === "browser" ? "its own browser" : "Claude in Chrome"}
-			</h2>
-			<div class="wrap">
-				<table>
-					<thead>
-						<tr>
-							<th>Task</th>
-							<th><span class="arm" style:--arm="var(--reduck)">{armName({ arm: "reduck", harness: summary.harness })}</span></th>
-							<th><span class="arm" style:--arm="var(--{summary.rival})">{armName({ arm: summary.rival, harness: summary.harness })}</span></th>
-							<th>Better</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each summary.rows as row (row.task.id)}
-							<tr>
-								<td><a href={replay(row.trial)}>{row.task.name}</a></td>
-								<td class="mono">{cell(row.reduck)} {clock(row.reduck.wallMs)} · ${row.reduck.costUsd.toFixed(2)}</td>
-								<td class="mono">{cell(row.other)} {clock(row.other.wallMs)} · ${row.other.costUsd.toFixed(2)}</td>
-								<td>
-									{#if row.better.arm}
-										<span class="arm" style:--arm="var(--{row.better.arm})">{armName({ arm: row.better.arm, harness: summary.harness })}</span>
-										<small>{row.better.text}</small>
-									{:else}
-										<small>{row.better.text}</small>
-									{/if}
-								</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			</div>
-			<p class="note">✓ passed · ✗ failed · ⚠ passed, but went around its tool. Each row is one run per tool, in one trial; open a task for its replay.</p>
-		</section>
-	{/if}
-
-	{#each parts as part, p (part.id)}
-	{#if parts.length > 1}<h2 class="part">{part.name}</h2>{/if}
-	{#each part.boards as { board, headline }, i (`${board.harness ?? "claude-code"}-${board.rival}`)}
 	<section class="board">
 		<!-- A table to a screen reader; the rows stay grids, so a phone can fold them. -->
-		<div role="table" aria-labelledby="metrics-{p}-{i}">
+		<div role="table" aria-labelledby="metrics">
 			<div class="row head" role="row">
-				<span role="columnheader"><h2 id="metrics-{p}-{i}">Key metrics · {harnessName(board.harness)} · Reduck vs {board.rival === "browser" ? "its own browser" : "Claude in Chrome"}</h2></span><span role="columnheader"
+				<span role="columnheader"><h2 id="metrics">Key metrics</h2></span><span role="columnheader"
 					>Passed</span
 				><span role="columnheader">Avg time*</span><span role="columnheader">Avg cost*</span>
 			</div>
 			{#each board.arms as a (a.arm)}
 				<div class="row" role="row">
-					<span class="arm" role="rowheader" style:--arm="var(--{a.arm})">{armName({ arm: a.arm, harness: board.harness })}</span>
+					<span class="arm" role="rowheader" style:--arm="var(--{a.arm})">{ARM_NAMES[a.arm]}</span>
 					<span role="cell">{a.passed}/{a.graded}</span>
 					<span role="cell">{board.compared ? clock(a.ms) : "–"}</span>
 					<span role="cell">{board.compared ? `$${a.usd.toFixed(2)}` : "–"}</span>
@@ -185,7 +91,7 @@
 			<p class="lead" style:--arm="var(--{headline.arm})">
 				<FontAwesomeIcon icon={faMedal} />
 				<span
-					><b>{armName({ arm: headline.arm, harness: board.harness })}</b>{#each headline.lines as line}{" · "}<span class="metric"
+					><b>{ARM_NAMES[headline.arm]}</b>{#each headline.lines as line}{" · "}<span class="metric"
 							>{#if line.n}<b>{line.n}</b>{" "}{/if}{line.word}</span
 						>{/each}, on the {board.compared}
 					{board.compared === 1 ? "task" : "tasks"} both passed</span
@@ -195,20 +101,17 @@
 		<p class="note">
 			{#if board.compared}
 				* Time and cost are the mean over the {board.compared}
-				{board.compared === 1 ? "task" : "tasks"} both tools passed, each with its own tool alone.
+				{board.compared === 1 ? "task" : "tasks"} both tools passed.
 			{:else}
 				* Time and cost show once both tools pass a task.
 			{/if}
 		</p>
 	</section>
-	{/each}
 
-	<Analysis tasks={part.tasks} notes={part.id === "hermes"} />
+	<h2 class="section">Tasks <span>{tasks.length}</span></h2>
 
-	<h2 class="section">Tasks <span>{part.tasks.length}</span></h2>
-
-	{#each part.tasks as task (task.id)}
-		{@const trial = shown(part.id, task)}
+	{#each tasks as task (task.id)}
+		{@const trial = task.trials.find((t) => t.id === picked[task.id])!}
 		{@const result = outcome(trial.runs)}
 		{@const longest = Math.max(...trial.runs.map((r) => r.wallMs))}
 		<article>
@@ -229,7 +132,7 @@
 					{#if result.winner}
 						<FontAwesomeIcon icon={faMedal} />
 						<span
-							><b>{armName(result.winner)} won</b>{#each result.lines as line}{" · "}<span
+							><b>{ARM_NAMES[result.winner.arm]} won</b>{#each result.lines as line}{" · "}<span
 									class="metric">{#if line.n}<b>{line.n}</b>{" "}{/if}{line.word}</span
 								>{/each}</span
 						>
@@ -240,7 +143,7 @@
 				{#each trial.runs as run (run.id)}
 					{@const why = reasons.has(run.id)}
 					<div class="run" style:--arm="var(--{run.arm})">
-						<span class="arm">{armName(run)}</span>
+						<span class="arm">{ARM_NAMES[run.arm]}</span>
 						<span class="bar"><span style:width="{(run.wallMs / longest) * 100}%"></span></span>
 						<span class="n">{clock(run.wallMs)}</span>
 						<span class="n">${run.costUsd.toFixed(2)}</span>
@@ -267,11 +170,7 @@
 
 			<footer>
 				{#if task.trials.length > 1}
-					<select
-						value={trial.id}
-						onchange={(e) => (picked[`${part.id}/${task.id}`] = e.currentTarget.value)}
-						aria-label="Run"
-					>
+					<select bind:value={picked[task.id]} aria-label="Run">
 						{#each task.trials as t (t.id)}<option value={t.id}>{day(t)}</option>{/each}
 					</select>
 				{:else}
@@ -280,7 +179,6 @@
 				<a class="open" href={replay(trial)}><FontAwesomeIcon icon={faPlay} /> Replay</a>
 			</footer>
 		</article>
-	{/each}
 	{/each}
 </main>
 
@@ -373,62 +271,9 @@
 		border-radius: 50%;
 		background: var(--arm);
 	}
-	.part {
-		margin: 40px 0 14px;
-		padding-top: 18px;
-		border-top: 1px solid var(--line);
-		font-size: 20px;
-		font-weight: 600;
-	}
-	.summary {
-		margin-bottom: 28px;
-		h2 {
-			margin: 0 0 8px;
-			font-size: 16px;
-			font-weight: 600;
-		}
-		.wrap {
-			overflow-x: auto;
-		}
-		table {
-			width: 100%;
-			border-collapse: collapse;
-			font-size: 13px;
-			font-variant-numeric: tabular-nums;
-		}
-		th,
-		td {
-			text-align: left;
-			padding: 7px 8px;
-			border-bottom: 1px solid var(--line);
-			vertical-align: top;
-		}
-		th {
-			font-weight: 500;
-			font-size: 12px;
-			color: var(--ink-2);
-		}
-		td a {
-			color: inherit;
-		}
-		td small {
-			display: block;
-			font-size: 11px;
-			color: var(--ink-2);
-		}
-		.mono {
-			white-space: nowrap;
-		}
-		.note {
-			margin: 6px 0 0;
-			font-size: 12px;
-			color: var(--ink-2);
-		}
-	}
 	.board {
 		/* Chrome's ink would vanish on the board's own. */
 		--chrome: #d1d5db;
-		--browser: #60a5fa;
 		margin-bottom: 40px;
 		padding: 18px 20px 16px;
 		border-radius: 12px;

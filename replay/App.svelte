@@ -105,7 +105,6 @@
 		--brand-text: #c2410c;
 		--reduck: #ea580c;
 		--chrome: var(--ink);
-		--browser: #2563eb;
 	}
 	:global(body) {
 		margin: 0;
